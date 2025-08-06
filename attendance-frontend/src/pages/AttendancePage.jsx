@@ -2,166 +2,194 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useLocation, useNavigate } from 'react-router-dom';
 
-
 export default function AttendancePage() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { classId, date } = location.state || {};
-
+  const { classId, date, isEdit: navIsEdit } = location.state || {};
   const [students, setStudents] = useState([]);
-  const [attendanceData, setAttendanceData] = useState({});
+  const [attendance, setAttendance] = useState({});
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [isEdit, setIsEdit] = useState(false);
 
-  // Redirect if no classId/date passed
+  // Fetch students and existing attendance if editing
   useEffect(() => {
     if (!classId || !date) {
       navigate('/class-selection');
+      return;
     }
-  }, [classId, date, navigate]);
 
-  // Fetch students for the selected class
-  useEffect(() => {
-    const fetchStudents = async () => {
+    async function fetchData() {
       try {
         const token = localStorage.getItem('token');
-        const res = await axios.get(`http://localhost:5000/students?classId=${classId}`, {
+        // Fetch students
+        const stuRes = await axios.get(`http://localhost:5000/students?classId=${classId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        setStudents(res.data);
+        setStudents(stuRes.data);
 
-        // Initialize attendanceData with all students present by default
-        const initialAttendance = {};
-        res.data.forEach(student => {
-          initialAttendance[student.regNoSuffix] = { present: true, reason: '' };
+        // Fetch existing attendance if editing
+        const attRes = await axios.get(`http://localhost:5000/attendance?classId=${classId}&date=${date}`, {
+          headers: { Authorization: `Bearer ${token}` },
         });
-        setAttendanceData(initialAttendance);
+
+        if (navIsEdit && attRes.data.length > 0) {
+          const existingSession = attRes.data[0];
+          const existingAttendance = {};
+
+          existingSession.attendance.forEach(a => {
+            existingAttendance[a.regNoSuffix] = {
+              state: a.od ? 'od' : a.present ? 'present' : 'absent',
+              reason: a.reason || '',
+            };
+          });
+
+          setAttendance(existingAttendance);
+          setIsEdit(true);
+        } else {
+          // New attendance (default all present)
+          const initial = {};
+          stuRes.data.forEach(s => {
+            initial[s.regNoSuffix] = { state: 'present', reason: '' };
+          });
+          setAttendance(initial);
+          setIsEdit(false);
+        }
 
         setLoading(false);
-      } catch (err) {
-        setError('Failed to load students.');
+      } catch {
+        setError('Failed to load students or attendance.');
         setLoading(false);
       }
-    };
-    fetchStudents();
-  }, [classId]);
+    }
 
-  // Handle checkbox toggle (present/absent)
-  const handleCheckboxChange = (regNoSuffix) => {
-    setAttendanceData(prev => ({
+    fetchData();
+  }, [classId, date, navigate, navIsEdit]);
+
+  const onStateChange = (regNoSuffix, value) => {
+    setAttendance(prev => ({
       ...prev,
       [regNoSuffix]: {
         ...prev[regNoSuffix],
-        present: !prev[regNoSuffix].present,
-        reason: prev[regNoSuffix].present ? '' : prev[regNoSuffix].reason,
-        // Clear reason if marked present
+        state: value,
+        reason: value === 'present' ? '' : prev[regNoSuffix]?.reason || '',
       },
     }));
   };
 
-  // Handle reason change when absent
-  const handleReasonChange = (regNoSuffix, value) => {
-    setAttendanceData(prev => ({
+  const onReasonChange = (regNoSuffix, value) => {
+    setAttendance(prev => ({
       ...prev,
-      [regNoSuffix]: {
-        ...prev[regNoSuffix],
-        reason: value,
-      },
+      [regNoSuffix]: { ...prev[regNoSuffix], reason: value },
     }));
   };
 
-  // Submit attendance to backend
-  const handleSubmit = async (e) => {
+  const handleSubmit = async e => {
     e.preventDefault();
     setError('');
 
-    // Validate that all absent students have reasons
-    for (const regNo in attendanceData) {
-      if (!attendanceData[regNo].present && !attendanceData[regNo].reason.trim()) {
-        setError('Please enter reasons for all absent students.');
+    // Validation
+    for (const regNo in attendance) {
+      if ((attendance[regNo].state === 'absent' || attendance[regNo].state === 'od') && !attendance[regNo].reason.trim()) {
+        setError('Please enter reasons for all Absents and ODs.');
         return;
       }
     }
 
-    const token = localStorage.getItem('token');
-    const attendanceArray = Object.entries(attendanceData).map(([regNoSuffix, data]) => ({
+    const finalAttendance = Object.entries(attendance).map(([regNoSuffix, data]) => ({
       regNoSuffix,
-      present: data.present,
-      reason: data.present ? '' : data.reason,
+      present: data.state === 'present' || data.state === 'od',
+      od: data.state === 'od',
+      reason: data.state === 'present' ? '' : data.reason,
     }));
 
     try {
-      // Send date as ISO string date (without time portion)
-      await axios.post('http://localhost:5000/attendance/submit', 
-        {
-          classId,
-          date,
-          time: new Date().toLocaleTimeString(), // or any specific time string
-          attendance: attendanceArray,
-        }, 
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      // Redirect to summary page with classId and date passed in state
+      const token = localStorage.getItem('token');
+      await axios.post('http://localhost:5000/attendance/submit', {
+        classId,
+        date,
+        time: new Date().toLocaleTimeString(),
+        attendance: finalAttendance,
+        isEdit,
+      }, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
       navigate('/summary', { state: { classId, date } });
     } catch (err) {
-      setError('Failed to submit attendance.');
+      setError(err.response?.data?.error || 'Failed to submit attendance.');
     }
   };
 
-  if (loading) return <p>Loading students...</p>;
-  if (error) return <p className="error">{error}</p>;
+  if (loading) return <div>Loading attendance...</div>;
+  if (error) return <div className="error">{error}</div>;
 
-return (
-  <div className="attendance-container hide-scrollbar">
-    <h2>Attendance for {date}</h2>
-    <form onSubmit={handleSubmit}>
-      <table className="attendance-table">
-        <thead>
-          <tr>
-            <th>S.No</th>
-            <th>Reg. No.</th>
-            <th>Name</th>
-            <th>Present</th>
-            <th>Reason (if absent)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {students.map((student, index) => {
-            const data = attendanceData[student.regNoSuffix] || { present: true, reason: '' };
-            return (
-              <tr key={student._id}>
-                <td>{index + 1}</td>
-                <td>{student.regNoPrefix ? student.regNoPrefix : ''}{student.regNoSuffix}</td>
-                <td>{student.name}</td>
+  return (
+    <div className="attendance-container">
+      <h3>{isEdit ? `Edit` : `Add`} Attendance for {date}</h3>
+      <form onSubmit={handleSubmit}>
+        <table className="attendance-table">
+          <thead>
+            <tr>
+              <th>Reg No</th>
+              <th>Name</th>
+              <th>Present</th>
+              <th>Absent</th>
+              <th>OD</th>
+              <th>Reason (if Absent/OD)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {students.map(s => (
+              <tr key={s.regNoSuffix}>
+                <td>{s.regNoPrefix}{s.regNoSuffix}</td>
+                <td>{s.name}</td>
                 <td>
-                  <input 
-                    type="checkbox" 
-                    checked={data.present} 
-                    onChange={() => handleCheckboxChange(student.regNoSuffix)} 
+                  <input
+                    type="radio"
+                    name={`attendance-${s.regNoSuffix}`}
+                    checked={attendance[s.regNoSuffix]?.state === 'present'}
+                    onChange={() => onStateChange(s.regNoSuffix, 'present')}
+                    disabled={attendance[s.regNoSuffix]?.state === 'od'}
                   />
                 </td>
                 <td>
-                  {!data.present && (
-                    <input 
-                      type="text" 
+                  <input
+                    type="radio"
+                    name={`attendance-${s.regNoSuffix}`}
+                    checked={attendance[s.regNoSuffix]?.state === 'absent'}
+                    onChange={() => onStateChange(s.regNoSuffix, 'absent')}
+                    disabled={attendance[s.regNoSuffix]?.state === 'od'}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="radio"
+                    name={`attendance-${s.regNoSuffix}`}
+                    checked={attendance[s.regNoSuffix]?.state === 'od'}
+                    onChange={() => onStateChange(s.regNoSuffix, 'od')}
+                  />
+                </td>
+                <td>
+                  {(attendance[s.regNoSuffix]?.state === 'absent' || attendance[s.regNoSuffix]?.state === 'od') && (
+                    <input
+                      type="text"
                       className="reason"
-                      placeholder="Enter reason" 
-                      value={data.reason} 
-                      onChange={e => handleReasonChange(student.regNoSuffix, e.target.value)} 
+                      value={attendance[s.regNoSuffix].reason}
+                      onChange={e => onReasonChange(s.regNoSuffix, e.target.value)}
+                      placeholder={`Reason for ${attendance[s.regNoSuffix].state === 'od' ? 'OD' : 'absent'}`}
                       required
                     />
                   )}
                 </td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <button type="submit" className='login-button'>Submit Attendance</button>
-    </form>
-  </div>
-);
-
+            ))}
+          </tbody>
+        </table>
+        <button className="login-button" type="submit" style={{ marginTop: '1rem' }}>
+          {isEdit ? 'Update Attendance' : 'Submit Attendance'}
+        </button>
+      </form>
+    </div>
+  );
 }

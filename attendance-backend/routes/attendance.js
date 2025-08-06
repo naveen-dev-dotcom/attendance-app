@@ -1,21 +1,108 @@
 const express = require('express');
 const router = express.Router();
 const AttendanceSession = require('../models/AttendanceSession');
+const AttendanceLog = require('../models/AttendanceLog');
 const Student = require('../models/Student');
 const mongoose = require('mongoose');
 const auth = require('../middleware/auth');
+const getDateOnly = d => (new Date(d)).setHours(0,0,0,0);
 
 // POST /attendance/submit - Record attendance for a class/date
-router.post('/submit',auth, async (req, res) => {
-  try {
-    const { classId, date, time, attendance } = req.body;
-    const session = new AttendanceSession({ classId, date, time, attendance });
-    await session.save();
-    res.status(201).json(session);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
+router.post('/submit', auth, async (req, res) => {
+  const { classId, date, attendance, time, isEdit } = req.body;
+  const username = req.admin?.username;
+  const dateOnly = getDateOnly(date);
+
+  const existing = await AttendanceSession.findOne({ 
+    classId,
+    date: { $gte: new Date(dateOnly), $lt: new Date(dateOnly + 86400000) }
+  });
+
+    // Force present: true for od: true
+  attendance.forEach(e => {
+    if (e.od) e.present = true;
+  });
+
+  if (existing && !isEdit) return res.status(400).json({ error: "Attendance already submitted. Use edit." });
+
+  // If edit, check if within 24hrs
+  if (existing && isEdit) {
+    const now = Date.now();
+    const createdAt = new Date(existing.createdAt).getTime();
+    if ((now - createdAt) > 86400000) // 24hrs
+      return res.status(403).json({ error: "Cannot edit after 24hrs" });
+
+    // Save log before edit
+    await AttendanceLog.create({
+      attendanceSessionId: existing._id,
+      action: "edit",
+      before: existing.attendance,
+      after: attendance,
+      editor: username,
+      timestamp: new Date()
+    });
+
+    existing.attendance = attendance;
+    existing.time = time;
+    existing.lastEditedBy = username;
+    await existing.save();
+    return res.json(existing);
   }
+
+  // New session
+  const session = new AttendanceSession({ classId, date, time, attendance, createdBy: username });
+  await session.save();
+
+  // Log add
+  await AttendanceLog.create({
+    attendanceSessionId: session._id,
+    action: "create",
+    before: null,
+    after: attendance,
+    editor: username,
+    timestamp: new Date()
+  });
+
+  res.status(201).json(session);
 });
+
+// GET /attendance/student/:studentId?classId=X
+router.get('/student/:studentId', auth, async (req, res) => {
+  const { studentId } = req.params, { classId } = req.query;
+  const student = await Student.findById(studentId);
+  if (!student) return res.status(404).json({ error: "Student not found" });
+
+  // Find all attendance sessions for class
+  const sessions = await AttendanceSession.find({ classId });
+  const records = [];
+  sessions.forEach(session => {
+    const record = session.attendance.find(r => r.regNoSuffix === student.regNoSuffix);
+    if (record)
+      records.push({
+        date: session.date,
+        present: record.present,
+        od: record.od,
+        reason: record.reason || "",
+      });
+  });
+
+  // Calculate stats, absents, ODs
+  const total = records.length;
+  const presentCount = records.filter(r => r.present && !r.od).length;
+  const odCount = records.filter(r => r.od).length;
+  const absentCount = total - presentCount - odCount;
+
+  const absents = records.filter(r => !r.present && !r.od).map(r => ({ date: r.date, reason: r.reason }));
+  const ods = records.filter(r => r.od).map(r => ({ date: r.date, reason: r.reason }));
+
+  res.json({
+    student: { name: student.name, regNo: student.regNoPrefix + student.regNoSuffix },
+    stats: { total, presentCount, absentCount, odCount },
+    absents,
+    ods,
+  });
+});
+
 
 // GET /attendance?classId=xxx&date=yyyy-mm-dd
 router.get('/',auth, async (req, res) => {

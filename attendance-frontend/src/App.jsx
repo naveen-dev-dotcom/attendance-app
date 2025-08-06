@@ -38,7 +38,7 @@ function App() {
 />
 
 
-        <Route path="*" element={<Navigate to="/login" />} />
+        <Route path="*" element={<Navigate to={isAuthenticated ? "/class-selection" : "/login"} />} />
       </Routes>
     </Router>
   );
