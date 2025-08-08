@@ -8,7 +8,8 @@ router.get('/', auth, async (req, res) => {
   try {
     const { classId } = req.query;
     const filter = classId ? { classId } : {};
-    const students = await Student.find(filter);
+    const students = await Student.find(filter)
+    .sort({ regNoSuffix: 1 }); // ascending order
     res.json(students);
   } catch (error) {
     res.status(500).json({ error: error.message });

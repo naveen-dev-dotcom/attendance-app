@@ -182,6 +182,7 @@ router.get('/summary-range', auth, async (req, res) => {
         studentId: student._id,
         name: student.name,
         regNo: student.regNoPrefix + student.regNoSuffix,
+        regNoSuffix: student.regNoSuffix,
         presentCount: summ.presentCount,
         absentCount: summ.absentCount,
         totalSessions: summ.total,
@@ -200,6 +201,11 @@ router.get('/summary-range', auth, async (req, res) => {
       overallPresentPercent: totalSessionsAll ? ((totalPresent / totalSessionsAll) * 100).toFixed(2) : "0.00",
       overallAbsentPercent: totalSessionsAll ? ((totalAbsent / totalSessionsAll) * 100).toFixed(2) : "0.00"
     };
+    // Sort report by regNoSuffix ascending
+report.sort((a, b) => {
+  // If regNoSuffix is numeric
+  return Number(a.regNoSuffix) - Number(b.regNoSuffix);
+});
 
     // 7. Find top 5 highest absent and present students (sorted descending)
     const topAbsent = [...report].sort((a, b) => b.absentCount - a.absentCount).slice(0, 5);

@@ -124,10 +124,11 @@ export default function AttendancePage() {
   if (loading) return <div>Loading attendance...</div>;
   if (error) return <div className="error">{error}</div>;
 
-  return (
-    <div className="attendance-container">
-      <h3>{isEdit ? `Edit` : `Add`} Attendance for {date}</h3>
-      <form onSubmit={handleSubmit}>
+return (
+  <div className="attendance-container">
+    <h3>{isEdit ? `Edit` : `Add`} Attendance for {date}</h3>
+    <form onSubmit={handleSubmit}>
+      <div className="table-wrapper">
         <table className="attendance-table">
           <thead>
             <tr>
@@ -186,10 +187,12 @@ export default function AttendancePage() {
             ))}
           </tbody>
         </table>
-        <button className="login-button" type="submit" style={{ marginTop: '1rem' }}>
-          {isEdit ? 'Update Attendance' : 'Submit Attendance'}
-        </button>
-      </form>
-    </div>
-  );
+      </div>
+      <button className="login-button" type="submit" style={{ marginTop: '1rem' }}>
+        {isEdit ? 'Update Attendance' : 'Submit Attendance'}
+      </button>
+    </form>
+  </div>
+);
+
 }

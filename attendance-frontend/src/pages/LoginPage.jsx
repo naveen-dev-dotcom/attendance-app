@@ -38,14 +38,18 @@ export default function LoginPage() {
             required
           />
         </div>
-<div className="form-group" style={{ position: "relative", width: "fit-content" }}>
+<div className="form-group" style={{ position: "relative", width: "100%" }}>
   <input
     type={showPass ? "text" : "password"}
     placeholder="Password"
     value={password}
     onChange={(e) => setPassword(e.target.value)}
     required
-    style={{ paddingRight: "2.5rem" }}  // add right padding so text doesn't overlap the emoji
+    style={{
+      width: "100%",
+      boxSizing: "border-box",
+      paddingRight: "2.5rem" // space for the emoji
+    }}
   />
   <span
     onClick={() => setShowPass((show) => !show)}
@@ -59,12 +63,13 @@ export default function LoginPage() {
       transform: "translateY(-50%)",
       cursor: "pointer",
       userSelect: "none",
-      fontSize: "1.2rem",
+      fontSize: "1.2rem"
     }}
   >
     {showPass ? "🙈" : "👁️"}
   </span>
 </div>
+
 
         <div className="form-group">
           <button type="submit" className="login-button">
